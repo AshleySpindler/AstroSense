@@ -5,20 +5,28 @@ import os
 
 from keras.layers import Lambda, Input, Conv2D, MaxPooling2D, UpSampling2D, Dense, Flatten, Reshape
 from keras.models import Model
-from keras.losses import mse
+from keras.losses import mse, binary_crossentropy
 from keras import backend as K
-from keras.utils import plot_model
+from keras.utils import plot_model, multi_gpu_model
 from keras.datasets import mnist
+from keras import optimizers
 
 #TODO build VAE class
 class VAE:
 
-    def __init__(self, input_shape, layers, filters, latent_dims):
+    def __init__(self, input_shape, layers, filters, latent_dims, beta, lr):
         self.encoder = self.encoder_model(input_shape, layers, filters, latent_dims)
         self.decoder = self.decoder_model(input_shape, layers, filters, latent_dims)
         self.inputs = self.encoder.inputs
         self.outputs = self.decoder(self.encoder(self.encoder.inputs)[2])
         self.autoencoder = Model(self.inputs, self.outputs, name='Autoencoder')
+        self._params = {'in_shape' : input_shape,
+                        'layers' : layers,
+                        'filters' : filters,
+                        'latent_dims' : latent_dims,
+                        'beta' : beta * latent_dims / input_shape[1]**2,
+                        'learning_rate' : lr,
+                       }
 
     #TODO build encoder model, variable n. of layers, mean and sigma latent space
     def encoder_model(self, input_shape, layers, filters, latent_dims):
@@ -51,6 +59,8 @@ class VAE:
         self.z = Lambda(VAE_sampling, output_shape=(latent_dims,), name='z')([self.z_mean,self.z_sigma])
         encoder = Model(l[0], [self.z_mean,self.z_sigma,self.z], name='encoder')
 
+        encoder.summary()
+
         return encoder
 
     def decoder_model(self, input_shape, layers, filters, latent_dims):
@@ -81,15 +91,21 @@ class VAE:
                             data_format='channels_last', name='DeConv_'+str(i),
                             activation='relu')(l[i*2+1]))
 
+        l.append(Conv2D(1, (3,3), padding='same',
+                        data_format='channels_last', name='decoder_output',
+                        activation='sigmoid')(l[-1]))
+
         decoder = Model(latent_inputs, l[-1], name='decoder')
+
+        decoder.summary()
 
         return decoder
 
     def compile_model(self):
 
-        self.reconstruction_loss = mse(K.flatten(self.inputs), 
-                                       K.flatten(self.outputs))
-        self.reconstruction_loss *= self.autoencoder.input_shape[1]*self.autoencoder.input_shape[1]
+        self.reconstruction_loss = (binary_crossentropy(K.flatten(self.inputs), 
+                                       K.flatten(self.outputs)))
+        #self.reconstruction_loss *= self.autoencoder.input_shape[1]*self.autoencoder.input_shape[1]
 
         self.kl_loss = (1 + self.z_sigma - 
                   K.square(self.z_mean) - 
@@ -97,11 +113,18 @@ class VAE:
         self.kl_loss = K.sum(self.kl_loss, axis=-1)
         self.kl_loss *= -0.5
 
-        vae_loss = K.mean(self.reconstruction_loss+self.kl_loss)
+        vae_loss = K.mean(self.reconstruction_loss+self._params['beta']*self.kl_loss)
 
         self.autoencoder.add_loss(vae_loss)
 
-        self.autoencoder.compile(optimizer='adam')
+        try:
+            self.autoencoder = multi_gpu_model(self.autoencoder, gpus=2)
+            print("Training using multiple GPUs..")
+        except ValueError:
+            self.autoencoder = self.autoencoder
+            print("Training using single GPU or CPU..")
+
+        self.autoencoder.compile(optimizers.Adam(lr=self._params['learning_rate']))
 
     def plot_models(self):
         self.autoencoder.summary()
@@ -193,22 +216,30 @@ def plot_results(models,
 
 if __name__ == '__main__':
     (x_train, y_train), (x_test, y_test) = mnist.load_data()
+
     image_size = x_train.shape[1]
     x_train = np.reshape(x_train, [-1, image_size, image_size, 1])
     x_test = np.reshape(x_test, [-1, image_size, image_size, 1])
     x_train = x_train.astype('float32') / 255
     x_test = x_test.astype('float32') / 255
+
     input_shape = x_train.shape[1:]
     layers = 2
-    filters = [1,5]
+    filters = [16,8]
     latent = 2
-    epochs = 50
-    batch_size = 128
-    vae = VAE(input_shape, layers, filters, latent)
+    beta = 5
+    lr = 1e-4
+
+    epochs = 500
+    batch_size =1024
+
+    vae = VAE(input_shape, layers, filters, latent, beta, lr)
     vae.compile_model()
-    #vae.autoencoder.fit(x_train, epochs=epochs, batch_size=batch_size, validation_data=(x_test, None))
-    #vae.autoencoder.save_weights('vae_mlp_mnist.h5')
-    vae.autoencoder.load_weights('vae_mlp_mnist.h5')
+
+    vae.autoencoder.fit(x_train, epochs=epochs, batch_size=batch_size, validation_data=(x_test, None))
+    vae.autoencoder.save_weights('vae_mlp_mnist.h5')
+    #vae.autoencoder.load_weights('vae_mlp_mnist.h5')
+
     models = (vae.encoder, vae.decoder)
     data = (x_test, y_test)
     plot_results(models, data, batch_size=batch_size, model_name="vae_cnn")
