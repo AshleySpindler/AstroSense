@@ -18,7 +18,7 @@ def create_dataset(filepath, batch_size, shuffle_size):
 
     dataset = dataset.map(_parse_function)
 
-    dataset = dataset.shuffle(shuffle_size)
+    #dataset = dataset.shuffle(shuffle_size)
 
     dataset = dataset.batch(batch_size)
 
