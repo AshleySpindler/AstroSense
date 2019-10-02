@@ -7,17 +7,33 @@ from skimage.color import rgb2gray
 from numpy.random import choice
 from skimage.exposure import rescale_intensity
 import sys
+from multiprocessing import Pool
+import tqdm
+
+import warnings
+warnings.filterwarnings("ignore")
+
+#TODO tidy this shit up
 
 def load_image(ID):
     img = mpimg.imread('/data/astroml/aspindler/GalaxyZoo/GalaxyZooImages/galaxy_'+str(ID)+'.png')
     img_crop = img[84:340,84:340]
     img_grey = rgb2gray(img_crop)
-    img_64 = rescale(img_grey, scale=4, preserve_range=True)
-    img_uint = rescale_intensity(img_128, out_range=(0,255)).astype('uint8')
+    img_64 = rescale(img_grey, scale=0.25, preserve_range=True)
+    img_uint = rescale_intensity(img_64, out_range=(0,255)).astype('uint8')
     return img_uint
 
 def _bytes_feature(value):
     return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
+
+def grab_data(ID):
+    img = load_image(ID)
+
+    feature = {'image': _bytes_feature(tf.compat.as_bytes(img.tostring()))}
+
+    example = tf.train.Example(features=tf.train.Features(feature=feature))
+
+    return example#writer.write(example.SerializeToString())
 
 #load IDs from fits
 IDs = fits.open('/data/astroml/aspindler/GalaxyZoo/gz2sample.fits.gz')[1].data['OBJID']
@@ -30,66 +46,38 @@ gals_train = IDs[gals[0:train]]
 gals_valid = IDs[gals[train:train+valid]]
 gals_test = IDs[gals[train+valid:train+valid+test]]
 
-train_filename = '/data/astroml/aspindler/GalaxyZoo/galzoo_train.tfrecords'  # address to save the TFRecords file
+train_filename = 'Data/Scratch/GalZoo2/galzoo_train.tfrecords'  # address to save the TFRecords file
 
 # open the TFRecords file
 writer = tf.python_io.TFRecordWriter(train_filename)
 
-for i in range(train):
-    if not i % 100:
-        print('Train data: {}/{}'.format(i, train))
-
-        sys.stdout.flush()
-
-    img = load_image(gals_train[i])
-
-    feature = {'train/label': _bytes_feature(tf.compat.as_bytes(img.tostring()))}
-
-    example = tf.train.Example(features=tf.train.Features(feature=feature))
-
-    writer.write(example.SerializeToString())
+pool = Pool(processes=20)       #Set pool of processors
+for result in tqdm.tqdm(pool.imap_unordered(grab_data, gals_train), total=len(gals_train)):
+    writer.write(result.SerializeToString())
 
 writer.close()
 sys.stdout.flush()
 
-valid_filename = '/data/astroml/aspindler/GalaxyZoo/galzoo_valid.tfrecords'  # address to save the TFRecords file
+valid_filename = 'Data/Scratch/GalZoo2/galzoo_valid.tfrecords'  # address to save the TFRecords file
 
 # open the TFRecords file
 writer = tf.python_io.TFRecordWriter(valid_filename)
 
-for i in range(valid):
-    if not i % 1000:
-        print('Valid data: {}/{}'.format(i, valid))
-        sys.stdout.flush()
-
-    img = load_image(gals_valid[i])
-
-    feature = {'image': _bytes_feature(tf.compat.as_bytes(img.tostring()))}
-
-    example = tf.train.Example(features=tf.train.Features(feature=feature))
-
-    writer.write(example.SerializeToString())
+pool = Pool(processes=20)       #Set pool of processors
+for result in tqdm.tqdm(pool.imap_unordered(grab_data, gals_valid), total=len(gals_valid)):
+    writer.write(result.SerializeToString())
 
 writer.close()
 sys.stdout.flush()
 
-test_filename = '/data/astroml/aspindler/GalaxyZoo/galzoo_test.tfrecords'  # address to save the TFRecords file
+test_filename = 'Data/Scratch/GalZoo2/galzoo_test.tfrecords'  # address to save the TFRecords file
 
 # open the TFRecords file
 writer = tf.python_io.TFRecordWriter(test_filename)
 
-for i in range(test):
-    if not i % 1000:
-        print('Test data: {}/{}'.format(i, test))
-        sys.stdout.flush()
-
-    img = load_image(gals_test[i])
-
-    feature = {'image': _bytes_feature(tf.compat.as_bytes(img.tostring()))}
-
-    example = tf.train.Example(features=tf.train.Features(feature=feature))
-
-    writer.write(example.SerializeToString())
+pool = Pool(processes=20)       #Set pool of processors
+for result in tqdm.tqdm(pool.imap_unordered(grab_data, gals_test), total=len(gals_test)):
+    writer.write(result.SerializeToString())
 
 writer.close()
 sys.stdout.flush()

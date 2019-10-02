@@ -12,15 +12,15 @@ def _parse_function(proto):
 
     return parsed_features['image']
 
-def create_dataset(filepath):
+def create_dataset(filepath, batch_size, shuffle_size):
 
     dataset = tf.data.TFRecordDataset(filepath)
 
     dataset = dataset.map(_parse_function)
 
-    dataset = dataset.shuffle(10000)
+    dataset = dataset.shuffle(shuffle_size)
 
-    dataset = dataset.batch(100)
+    dataset = dataset.batch(batch_size)
 
     dataset = dataset.repeat(-1)
 
@@ -28,9 +28,7 @@ def create_dataset(filepath):
 
     image = iterator.get_next()
 
-    image = tf.reshape(image, [-1, 128, 128, 1])
-
-    image = tf.image.resize(image, [64,64])
+    image = tf.reshape(image, [-1, 64, 64, 1])
 
     image = tf.divide(image, 255)
 
