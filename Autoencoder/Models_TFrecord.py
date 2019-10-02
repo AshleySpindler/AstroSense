@@ -128,20 +128,22 @@ def vae_loss_func(z_mean, z_sigma, beta, loss=None):
 #loss, str to pick loss function, defaults to binary crossentropy
     def recon(y_true, y_pred):
         if loss == 'mse':
-            reconstruction_loss = mse(K.flatten(y_true),
-                                                  K.flatten(y_pred))
+            #reconstruction_loss = mse(K.flatten(y_true),K.flatten(y_pred))
         else:
-            reconstruction_loss = binary_crossentropy(K.flatten(y_true),
-                                                  K.flatten(y_pred))
+            #reconstruction_loss = binary_crossentropy(K.flatten(y_true), K.flatten(y_pred))
+            reconstruction_loss = K.binary_crossentropy((y_true), (y_pred))
+            reconstruction_loss = K.sum(reconstruction_loss, axis=(1,2,3))
+            reconstruction-loss = K.mean(reconstruction_loss, axis=-1)
 
         #KL divergence, we normalise by beta to tune amount of regularisation
         kl_loss = (1 + z_sigma -
                   K.square(z_mean) - 
                   K.exp(z_sigma))
         kl_loss = K.sum(kl_loss, axis=-1)
-        kl_loss *= -0.5 * beta
+        kl_loss *= -0.5
+        kl_loss = K.mean(kl_loss)
 
-        return K.mean(reconstruction_loss+kl_loss)
+        return reconstruction_loss+beta*kl_loss
 
     return recon
 
