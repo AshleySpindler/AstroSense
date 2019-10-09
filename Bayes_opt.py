@@ -37,11 +37,11 @@ def objective(params):
     filters = [int(params['Filters_1']), int(params['Filters_2']), int(params['Filters_3'])]
     latent = int(params['Latent'])
     learning_rate = params['learning_rate']
-    beta = 1 #not playing with beta yet, as it has the affect of making reconstruction worse
+    beta = params['beta']#1*32/64**2 #not playing with beta yet, as it has the affect of making reconstruction worse
     layers = 3 #not playing with layers, difficult to code and unlikely to improve loss
 
     #make the model
-    encoder, inputs, latent_z = Models.encoder_model(x_train, layers, filters, latent)
+    encoder, inputs, latent_z = Models.encoder_model(x_train, layers, filters, latent, beta)
     decoder = Models.decoder_model(encoder, layers, filters, latent)
     vae = Models.autoencoder_model(inputs, decoder, latent_z[2])
 
@@ -55,8 +55,7 @@ def objective(params):
     #compile and fit, only new stuff is the callback
     #need to play with verbosity, rn too much clutter in terminal
     vae.compile(optimizers.Adam(lr=learning_rate),
-                loss=Models.vae_loss_func(latent_z[0],
-                                   latent_z[1], beta),
+                loss=Models.nll,
                 target_tensors=inputs,
                 )
     vae.fit(batch_size=None, epochs=EPOCHS,
@@ -77,14 +76,14 @@ def objective(params):
     #continue training if we want
     if loss < BEST_LOSS:
         #vae.save('Data/Scratch/GalZoo2/Bayes_Best_Model.h5')
-        vae.save_weights('Data/Scratch/GalZoo2/Bayes_Best_Weights.h5')
+        vae.save_weights('Data/Scratch/GalZoo2/bayes_Best_Weights.h5')
         BEST_LOSS = loss
 
     # Write to the csv file ('a' means append)
     of_connection = open(out_file, 'a')
     writer = csv.writer(of_connection)
     writer.writerow([loss, params['Filters_1'], params['Filters_2'], params['Filters_3'],
-                     params['Latent'], params['learning_rate'], ITERATION, run_time, STATUS_OK])
+                     params['Latent'], params['learning_rate'], params['beta'], ITERATION, run_time, STATUS_OK])
     of_connection.close()
 
     return {'loss': loss, 'params': params, 'iteration': ITERATION,
@@ -100,7 +99,8 @@ space = {
          'Latent' : hp.quniform('Latent', 1, 50, 1),
          'learning_rate': hp.loguniform('learning_rate',
                                          np.log(0.00001),
-                                         np.log(0.001))
+                                         np.log(0.001)),
+         'beta' : hp.uniform('beta', 1, 25)
         }
 
 # Algorithm
@@ -125,7 +125,7 @@ of_connection = open(out_file, 'w')
 writer = csv.writer(of_connection)
 
 # Write the headers to the file
-writer.writerow(['loss', 'Filters 1', 'Filters 2', 'Filters 3', 'Latent', 'Learning Rate', 'iteration', 'train_time', 'status'])
+writer.writerow(['loss', 'Filters 1', 'Filters 2', 'Filters 3', 'Latent', 'Learning Rate', 'beta', 'iteration', 'train_time', 'status'])
 of_connection.close()
 
 MAX_EVALS = 500 #how many tests we wanna do, balanced is of course time/results
@@ -148,12 +148,12 @@ best = fmin(fn = objective, space = space, algo = tpe.suggest,
 #or just look at the pretty results
 
 plotting.main_plot_history(bayes_trials)
-plt.savefig('Data/Scratch/GalZoo2/Bayes_trials_main_history.png')
+plt.savefig('Data/Scratch/GalZoo2/bayes_trials_main_history.png')
 
 plotting.main_plot_histogram(bayes_trials)
-plt.savefig('Data/Scratch/GalZoo2/Bayes_trials_main_histogram.png')
+plt.savefig('Data/Scratch/GalZoo2/bayes_trials_main_histogram.png')
 
 plotting.main_plot_vars(bayes_trials)
-plt.savefig('Data/Scratch/GalZoo2/Bayes_trials_main_plot_vars.png')
+plt.savefig('Data/Scratch/GalZoo2/bayes_trials_main_plot_vars.png')
 
-pickle.dump(bayes_trials, open('Data/Scratch/GalZoo2/Bayes_Trials_database.p', 'wb'))
+pickle.dump(bayes_trials, open('Data/Scratch/GalZoo2/bayes_Trials_database.p', 'wb'))

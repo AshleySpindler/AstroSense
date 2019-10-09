@@ -17,7 +17,7 @@ import keras as k
 import matplotlib.pyplot as plt
 import os
 
-from keras.layers import Lambda, Input, Conv2D, MaxPooling2D, UpSampling2D, Dense, Flatten, Reshape, Conv2DTranspose
+from keras.layers import Lambda, Input, Conv2D, MaxPooling2D, UpSampling2D, Dense, Flatten, Reshape, Conv2DTranspose, Layer
 from keras.models import Model
 from keras.losses import mse, binary_crossentropy
 from keras import backend as K
@@ -27,7 +27,31 @@ from keras import optimizers
 
 import tensorflow as tf
 
-def encoder_model(input_data, layers, filters, latent_dims):
+class KLDivergenceLayer(Layer):
+
+    """ Identity transform layer that adds KL divergence
+    to the final model loss.
+    """
+
+    def __init__(self, beta, *args, **kwargs):
+        self.is_placeholder = True
+        super(KLDivergenceLayer, self).__init__(*args, **kwargs)
+        self.beta = beta
+    def call(self, inputs):
+
+        mu, log_var = inputs
+
+        self.kl_batch = - .5 * K.sum(1 + log_var -
+                                K.square(mu) -
+                                K.exp(log_var), axis=-1)
+
+        print('kl',K.mean(self.kl_batch))
+        self.add_loss(self.beta*K.mean(self.kl_batch), inputs=inputs)
+
+        return inputs
+
+
+def encoder_model(input_data, layers, filters, latent_dims, beta):
     """
     Initialise the Encoder part of the Variational Autoencoder
     Inputs:
@@ -58,6 +82,8 @@ def encoder_model(input_data, layers, filters, latent_dims):
     # we sample z from the dist to pass into the decoder and fit the model
     z_mean = Dense(latent_dims, name='z_mean')(conv_out) #Q Do these need Activations?
     z_sigma = Dense(latent_dims, name='z_sigma')(conv_out)
+    z_mean, z_sigma = KLDivergenceLayer(beta)([z_mean, z_sigma])
+
     z = Lambda(VAE_sampling, output_shape=(latent_dims,), name='z')([z_mean,z_sigma])
 
     #Build the model, return the model, inputs and outputs
@@ -128,12 +154,12 @@ def vae_loss_func(z_mean, z_sigma, beta, loss=None):
 #loss, str to pick loss function, defaults to binary crossentropy
     def recon(y_true, y_pred):
         if loss == 'mse':
-            #reconstruction_loss = mse(K.flatten(y_true),K.flatten(y_pred))
+            reconstruction_loss = mse(y_true,y_pred)
         else:
             #reconstruction_loss = binary_crossentropy(K.flatten(y_true), K.flatten(y_pred))
-            reconstruction_loss = K.binary_crossentropy((y_true), (y_pred))
+            reconstruction_loss = K.binary_crossentropy(y_true, y_pred)
             reconstruction_loss = K.sum(reconstruction_loss, axis=(1,2,3))
-            reconstruction-loss = K.mean(reconstruction_loss, axis=-1)
+            reconstruction_loss = K.mean(reconstruction_loss, axis=-1)
 
         #KL divergence, we normalise by beta to tune amount of regularisation
         kl_loss = (1 + z_sigma -
@@ -142,10 +168,20 @@ def vae_loss_func(z_mean, z_sigma, beta, loss=None):
         kl_loss = K.sum(kl_loss, axis=-1)
         kl_loss *= -0.5
         kl_loss = K.mean(kl_loss)
-
-        return reconstruction_loss+beta*kl_loss
+        
+        return K.sum(reconstruction_loss, axis=(1,2))+beta*kl_loss
 
     return recon
+
+def nll(y_true, y_pred):
+    """ Negative log likelihood (Bernoulli). """
+
+    # keras.losses.binary_crossentropy gives the mean
+    # over the last axis. we require the sum
+    loss = K.sum(K.binary_crossentropy(y_true, y_pred), axis=(1,2,3))
+    print('nll', loss)
+    return loss
+
 
 #sampling function for VAE
 def VAE_sampling(args):

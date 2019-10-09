@@ -26,27 +26,49 @@ def load_image(ID):
 def _bytes_feature(value):
     return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
 
-def grab_data(ID):
+def grab_data(i):
+    ID = IDs[0][i]
+    condition = (IDs[1][i]).astype('uint8')
     img = load_image(ID)
 
-    feature = {'image': _bytes_feature(tf.compat.as_bytes(img.tostring()))}
+    feature = {'image': _bytes_feature(tf.compat.as_bytes(img.tostring())),
+               'condition': _bytes_feature(tf.compat.as_bytes(condition.tostring()))
+              }
 
     example = tf.train.Example(features=tf.train.Features(feature=feature))
 
     return example#writer.write(example.SerializeToString())
 
 #load IDs from fits
-IDs = fits.open('/data/astroml/aspindler/GalaxyZoo/gz2sample.fits.gz')[1].data['OBJID']
+data = fits.open('Data/Scratch/GalZoo2/gz2_hart16.fits.gz')[1].data
 
-train, valid, test = 10000, 10000, 100000
+spiral = (data['t02_edgeon_a05_no_flag'] & (data['t02_edgeon_a05_no_count'] > 20)).astype(bool)
+data = data[spiral]
 
-gals = choice(IDs.shape[0], train+valid+test)
+global IDs
 
-gals_train = IDs[gals[0:train]]
-gals_valid = IDs[gals[train:train+valid]]
-gals_test = IDs[gals[train+valid:train+valid+test]]
+IDs = [data['dr7objid'],
+      np.array([data['t03_bar_a06_bar_flag'],
+                data['t03_bar_a07_no_bar_flag'],
+                data['t04_spiral_a08_spiral_flag'],
+                data['t04_spiral_a09_no_spiral_flag'],
+                data['t05_bulge_prominence_a10_no_bulge_flag'],
+                data['t05_bulge_prominence_a11_just_noticeable_flag'],
+                data['t05_bulge_prominence_a12_obvious_flag'],
+                data['t05_bulge_prominence_a13_dominant_flag']
+               ])]
+IDs[1] = np.swapaxes(IDs[1],0,1)
 
-train_filename = 'Data/Scratch/GalZoo2/galzoo_train.tfrecords'  # address to save the TFRecords file
+train, valid, test = 10000, 10000, 25000
+
+gals = choice(len(IDs[0]), train+valid+test)
+
+global gals_train, gals_valid, gals_test
+gals_train = gals[0:train]
+gals_valid = gals[train:train+valid]
+gals_test = gals[train+valid:train+valid+test]
+
+train_filename = 'Data/Scratch/GalZoo2/galzoo_spiral_flags_train.tfrecords'  # address to save the TFRecords file
 
 # open the TFRecords file
 writer = tf.python_io.TFRecordWriter(train_filename)
@@ -58,7 +80,7 @@ for result in tqdm.tqdm(pool.imap_unordered(grab_data, gals_train), total=len(ga
 writer.close()
 sys.stdout.flush()
 
-valid_filename = 'Data/Scratch/GalZoo2/galzoo_valid.tfrecords'  # address to save the TFRecords file
+valid_filename = 'Data/Scratch/GalZoo2/galzoo_spiral_flags_valid.tfrecords'  # address to save the TFRecords file
 
 # open the TFRecords file
 writer = tf.python_io.TFRecordWriter(valid_filename)
@@ -70,7 +92,7 @@ for result in tqdm.tqdm(pool.imap_unordered(grab_data, gals_valid), total=len(ga
 writer.close()
 sys.stdout.flush()
 
-test_filename = 'Data/Scratch/GalZoo2/galzoo_test.tfrecords'  # address to save the TFRecords file
+test_filename = 'Data/Scratch/GalZoo2/galzoo_spiral_flags_test.tfrecords'  # address to save the TFRecords file
 
 # open the TFRecords file
 writer = tf.python_io.TFRecordWriter(test_filename)
@@ -81,3 +103,4 @@ for result in tqdm.tqdm(pool.imap_unordered(grab_data, gals_test), total=len(gal
 
 writer.close()
 sys.stdout.flush()
+
